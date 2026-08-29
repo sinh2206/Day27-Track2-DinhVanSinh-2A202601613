@@ -172,7 +172,8 @@ anomaly_result = detect_anomaly(
 slo_info = calculate_slo(0.999, bad_events=len(critical_fails), total_events=max(1, len(orders_df)))
 short_burn = 15.0 if critical_fails else 0.2
 long_burn = 14.8 if critical_fails else 0.1
-multiwindow_res = evaluate_multiwindow_burn(short_burn, long_burn)
+multiwindow_res = evaluate_multiwindow_burn(short_window_burn=short_burn, long_window_burn=long_burn)
+
 
 
 # ---------------------------------------------------------
@@ -377,7 +378,8 @@ with tab_slo:
         st.markdown("##### 🎛️ Multi-Window Alerting Simulator")
         sim_short = st.slider("1-Hour Short Window Burn Rate:", 0.0, 30.0, 15.0, 0.5)
         sim_long = st.slider("6-Hour Long Window Burn Rate:", 0.0, 30.0, 2.0, 0.5)
-        eval_alert = evaluate_multiwindow_burn(sim_short, sim_long)
+        eval_alert = evaluate_multiwindow_burn(short_window_burn=sim_short, long_window_burn=sim_long)
+
 
         if eval_alert["page"]:
             st.error(f"🚨 **PAGING ALERT TRIGGERED (P1)**: {eval_alert['reason']}")

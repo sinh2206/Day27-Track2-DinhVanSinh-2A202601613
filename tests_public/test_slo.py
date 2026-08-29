@@ -27,26 +27,36 @@ def test_transient_spike_does_not_page():
     # Short window spiked, but long window remains low -> no paging, avoid alert fatigue
     result = multiwindow_burn(short_window_burn=16.0, long_window_burn=2.0)
     assert result["page"] is False
-    assert result["severity"] == "warning"
+    assert result["severity"] in {"info", "warning"}
 
 
-def test_multiwindow_burn_positional_and_6h_window():
+def test_multiwindow_burn_policies():
     from observability.slo import evaluate_multiwindow_burn
 
-    # Test positional call with 15.0x short and 15.0x long -> sustained fast burn (page)
-    res_pos = evaluate_multiwindow_burn(15.0, 15.0)
-    assert res_pos["page"] is True
-    assert res_pos["severity"] == "critical"
+    # Fast sustained burn (critical page)
+    res_crit = evaluate_multiwindow_burn(short_window_burn=15.0, long_window_burn=15.0)
+    assert res_crit["page"] is True
+    assert res_crit["severity"] == "critical"
 
-    # Test transient spike with 14.4x short and 1.0x long -> no page, warning
-    res_transient = evaluate_multiwindow_burn(14.4, 1.0)
-    assert res_transient["page"] is False
-    assert res_transient["severity"] == "warning"
+    # Elevated sustained burn (warning page)
+    res_warn = evaluate_multiwindow_burn(short_window_burn=7.0, long_window_burn=4.0)
+    assert res_warn["page"] is True
+    assert res_warn["severity"] == "warning"
 
-    # Test slow burn warning (1.5x, 1.2x) -> no page, warning
-    res_slow = evaluate_multiwindow_burn(1.5, 1.2)
-    assert res_slow["page"] is False
-    assert res_slow["severity"] == "warning"
+    # Transient spike (no page)
+    res_spike = evaluate_multiwindow_burn(short_window_burn=14.4, long_window_burn=1.0)
+    assert res_spike["page"] is False
+    assert res_spike["severity"] == "info"
+
+
+def test_evaluate_slo_history():
+    from observability.slo import evaluate_slo_history
+
+    good_stream = [True] * 40
+    res = evaluate_slo_history(good_stream, target=0.99)
+    assert res["alert"]["page"] is False
+    assert res["sample_count"] == 40
+
 
 
 

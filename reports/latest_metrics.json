@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-08-29T05:54:56.025714+00:00",
+  "timestamp": "2026-08-29T06:20:38.231805+00:00",
   "orders_rows": 600,
   "failed_contract_checks": 0,
   "critical_contract_failures": 0,
@@ -7,10 +7,10 @@
   "row_count_anomaly": {
     "is_anomaly": true,
     "score": 18.751099999999997,
-    "method": "auto:mad",
-    "reason": "median=252.500, mad=12.500, threshold=3.0 [context: metric_name=row_count, day_of_week=5]"
+    "method": "auto:seasonal_mad",
+    "reason": "median=252.500, mad=12.500, threshold=3.5; segment_size=6"
   },
-  "orders_freshness_minutes": 5.033429566666666,
+  "orders_freshness_minutes": 5.036906133333333,
   "kb_text_length_signal": {
     "is_anomaly": false,
     "score": 0.7547940916996035,

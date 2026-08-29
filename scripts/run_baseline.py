@@ -37,8 +37,9 @@ def main() -> None:
         len(orders),
         row_history,
         method="auto",
-        context={"metric_name": "row_count", "day_of_week": current_dow},
+        context={"metric_name": "row_count", "day_of_week": current_dow, "same_segment_history": segment},
     )
+
 
     updated = pd.to_datetime(orders["updated_at"], utc=True, errors="coerce")
     freshness_minutes = (
