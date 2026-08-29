@@ -1,0 +1,31 @@
+unit_tests:
+  - name: test_completed_orders_sum_to_expected_revenue
+    description: "Verify that daily completed revenue and count aggregate correctly."
+    model: fct_daily_revenue
+    given:
+      - input: ref('stg_orders')
+        rows:
+          - {order_id: 1, customer_id: C0001, amount_usd: 100.0, status: completed, order_date: '2026-08-01'}
+          - {order_id: 2, customer_id: C0001, amount_usd: 70.0, status: completed, order_date: '2026-08-01'}
+          - {order_id: 3, customer_id: C0002, amount_usd: 50.0, status: pending, order_date: '2026-08-01'}
+      - input: ref('stg_customers')
+        rows:
+          - {customer_id: C0001, is_active: true}
+    expect:
+      rows:
+        - {order_date: '2026-08-01', completed_order_rows: 2, daily_revenue: 170.0}
+
+  - name: test_customer_dimension_scd_does_not_inflate_revenue
+    description: "Verify that multiple active rows for the same customer do NOT duplicate order rows or inflate revenue."
+    model: fct_daily_revenue
+    given:
+      - input: ref('stg_orders')
+        rows:
+          - {order_id: 1, customer_id: C0001, amount_usd: 100.0, status: completed, order_date: '2026-08-01'}
+      - input: ref('stg_customers')
+        rows:
+          - {customer_id: C0001, is_active: true}
+          - {customer_id: C0001, is_active: true}
+    expect:
+      rows:
+        - {order_date: '2026-08-01', completed_order_rows: 1, daily_revenue: 100.0}
