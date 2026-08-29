@@ -33,14 +33,20 @@ def test_transient_spike_does_not_page():
 def test_multiwindow_burn_positional_and_6h_window():
     from observability.slo import evaluate_multiwindow_burn
 
-    # Test positional call with 14.4x short and 6.0x long (6h Google SRE window)
-    res_pos = evaluate_multiwindow_burn(14.4, 6.0)
+    # Test positional call with 15.0x short and 15.0x long -> sustained fast burn (page)
+    res_pos = evaluate_multiwindow_burn(15.0, 15.0)
     assert res_pos["page"] is True
     assert res_pos["severity"] == "critical"
+
+    # Test transient spike with 14.4x short and 1.0x long -> no page, warning
+    res_transient = evaluate_multiwindow_burn(14.4, 1.0)
+    assert res_transient["page"] is False
+    assert res_transient["severity"] == "warning"
 
     # Test slow burn warning (1.5x, 1.2x) -> no page, warning
     res_slow = evaluate_multiwindow_burn(1.5, 1.2)
     assert res_slow["page"] is False
     assert res_slow["severity"] == "warning"
+
 
 

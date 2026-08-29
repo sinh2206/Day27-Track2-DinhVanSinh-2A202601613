@@ -157,40 +157,43 @@ def _extract_context_segment(
 def detect_anomaly(
     current: float,
     history: Iterable[float],
-    *,
     method: str = "auto",
-    threshold: float = 3.0,
+    threshold: float | None = None,
     context: dict[str, Any] | None = None,
+    **kwargs: Any,
 ) -> dict[str, Any]:
     """Stable API for anomaly detection.
 
     Modes:
-    - `zscore`: Standard z-score.
-    - `mad`: Robust Median Absolute Deviation.
+    - `zscore`: Standard z-score (default threshold: 3.0).
+    - `mad`: Robust Median Absolute Deviation (default threshold: 3.5).
     - `auto`: Context-aware detector that evaluates:
         - `same_segment_history` / `day_of_week`: compares against same weekday.
         - `known_event`: suppresses false alarms for expected promotional spikes.
         - Defaults to robust MAD detector to avoid outlier masking.
     """
     if method == "zscore":
-        return zscore_detector(current, history, threshold=threshold)
+        thresh = threshold if threshold is not None else 3.0
+        return zscore_detector(current, history, threshold=thresh, **kwargs)
 
     if method == "mad":
-        return mad_detector(current, history, threshold=threshold)
+        thresh = threshold if threshold is not None else 3.5
+        return mad_detector(current, history, threshold=thresh, **kwargs)
 
     if method == "auto":
+        thresh = threshold if threshold is not None else 3.0
         ctx = context or {}
         eff_history, method_name = _extract_context_segment(history, ctx)
 
         # Compute MAD score on the effective history
-        result = mad_detector(current, eff_history, threshold=threshold)
+        result = mad_detector(current, eff_history, threshold=thresh, **kwargs)
         
         # Fallback to general history if segment was too small
         if result["reason"] == "insufficient_history":
             gen_vals = np.asarray(list(history), dtype=float)
             gen_vals = gen_vals[~np.isnan(gen_vals)]
-            if gen_vals.size >= 3:
-                result = mad_detector(current, gen_vals, threshold=threshold)
+            if gen_vals.size >= 2:
+                result = mad_detector(current, gen_vals, threshold=thresh, **kwargs)
                 method_name = "auto:mad"
 
         result["method"] = method_name
@@ -214,5 +217,6 @@ def detect_anomaly(
         return result
 
     raise ValueError(f"Unsupported method: {method}")
+
 
 

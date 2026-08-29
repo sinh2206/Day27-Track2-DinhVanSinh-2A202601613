@@ -24,26 +24,41 @@ def validate_orders(df: pd.DataFrame, contract_path: str | Path) -> list[dict[st
 def detect_metric(
     current: float,
     history: Iterable[float],
-    *,
     method: str = "auto",
     context: dict[str, Any] | None = None,
+    **kwargs: Any,
 ) -> dict[str, Any]:
-    return detect_anomaly(current, history, method=method, context=context)
+    return detect_anomaly(current, history, method=method, context=context, **kwargs)
 
 
-def detect_distribution(current_values: Iterable[float], baseline_values: Iterable[float]) -> dict[str, Any]:
-    return detect_distribution_shift(current_values, baseline_values)
+def detect_distribution(
+    current_values: Iterable[float],
+    baseline_values: Iterable[float],
+    **kwargs: Any,
+) -> dict[str, Any]:
+    return detect_distribution_shift(current_values, baseline_values, **kwargs)
 
 
-def slo_status(target: float, bad_events: int, total_events: int) -> dict[str, Any]:
-    return calculate_slo(target, bad_events, total_events)
+def slo_status(
+    target: float,
+    bad_events: int,
+    total_events: int,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    return calculate_slo(target, bad_events, total_events, **kwargs)
 
 
-def multiwindow_burn(short_window_burn: float, long_window_burn: float) -> dict[str, Any]:
+def multiwindow_burn(
+    short_window_burn: float = 0.0,
+    long_window_burn: float = 0.0,
+    **kwargs: Any,
+) -> dict[str, Any]:
     return evaluate_multiwindow_burn(
         short_window_burn=short_window_burn,
         long_window_burn=long_window_burn,
+        **kwargs,
     )
+
 
 
 def downstream_assets(graph: dict[str, list[str]], start: str) -> list[str]:

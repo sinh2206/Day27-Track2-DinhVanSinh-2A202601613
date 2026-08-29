@@ -3,26 +3,42 @@ from __future__ import annotations
 from typing import Any
 
 
-def calculate_slo(target: float, bad_events: int, total_events: int) -> dict[str, Any]:
-    if not 0 < target < 1:
+def calculate_slo(
+    target: float,
+    bad_events: int | float,
+    total_events: int | float,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    # Normalize percentage target (e.g. 99.5 -> 0.995)
+    t = float(target)
+    if 1.0 < t <= 100.0:
+        t = t / 100.0
+
+    if not 0 < t < 1:
         raise ValueError("target must be between 0 and 1 (exclusive)")
-    if bad_events < 0 or total_events < 0 or bad_events > total_events:
+
+    bad = int(bad_events)
+    total = int(total_events)
+
+    if bad < 0 or total < 0 or bad > total:
         raise ValueError("invalid event counts")
-    allowed_bad_rate = 1.0 - target
-    if total_events == 0:
+
+    allowed_bad_rate = 1.0 - t
+    if total == 0:
         return {
-            "target": target,
+            "target": t,
             "actual_bad_rate": 0.0,
             "allowed_bad_rate": allowed_bad_rate,
             "burn_rate": 0.0,
             "remaining_error_budget_fraction": 1.0,
             "breached": False,
         }
-    actual_bad_rate = bad_events / total_events
+
+    actual_bad_rate = bad / total
     burn_rate = actual_bad_rate / allowed_bad_rate
     consumed_fraction = min(1.0, actual_bad_rate / allowed_bad_rate)
     return {
-        "target": target,
+        "target": t,
         "actual_bad_rate": actual_bad_rate,
         "allowed_bad_rate": allowed_bad_rate,
         "burn_rate": burn_rate,
@@ -46,11 +62,8 @@ def evaluate_multiwindow_burn(
 
     Principles:
     - Fast burn / Paging (P1): Triggered when BOTH short window (fast detection)
-      and long window (sustained burn) exceed critical thresholds:
-      * 1-hour fast burn: short >= 14.4 and long >= 14.4 (2% budget in 1h)
-      * 6-hour medium burn: short >= 6.0 and long >= 6.0 (5% budget in 6h)
-      * Custom thresholds: short >= short_threshold and long >= long_threshold
-    - Transient spike: Short window exceeds threshold, but long window does not -> DO NOT page (avoid alert fatigue).
+      and long window (sustained burn) exceed critical thresholds (default: >= 14.4x).
+    - Transient spike: Short window exceeds threshold, but long window does not -> DO NOT page.
     - Slow burn: Both >= 1.0 -> Non-paging ticket/warning.
     - Healthy: Normal operations within budget.
     """
@@ -58,11 +71,7 @@ def evaluate_multiwindow_burn(
     l_burn = float(long_window_burn)
 
     # 1. Critical Page: Sustained fast burn over both short and long windows
-    if (
-        (s_burn >= short_threshold and l_burn >= long_threshold)
-        or (s_burn >= 14.4 and l_burn >= 6.0)
-        or (s_burn >= 6.0 and l_burn >= 6.0)
-    ):
+    if s_burn >= short_threshold and l_burn >= long_threshold:
         return {
             "page": True,
             "severity": "critical",
@@ -76,13 +85,13 @@ def evaluate_multiwindow_burn(
         }
 
     # 2. Transient Spike: Short window spiked, but long window is normal (avoid alert fatigue)
-    if (s_burn >= short_threshold or s_burn >= 6.0) and l_burn < 6.0:
+    if s_burn >= short_threshold and l_burn < long_threshold:
         return {
             "page": False,
             "severity": "warning",
             "reason": (
                 f"transient_spike_no_page: short_burn={s_burn:.2f} spiked "
-                f"but long_burn={l_burn:.2f} is below sustained threshold"
+                f"but long_burn={l_burn:.2f} is below sustained threshold {long_threshold}"
             ),
             "short_window_burn": s_burn,
             "long_window_burn": l_burn,
@@ -109,5 +118,6 @@ def evaluate_multiwindow_burn(
         "long_window_burn": l_burn,
         "policy": policy,
     }
+
 
 
