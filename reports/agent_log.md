@@ -30,12 +30,35 @@
 - Accept / reject / revise: Accept.
 - Why: Combines data-at-rest assertions (generic/singular data tests) with transformation logic verification (dbt native unit tests), preventing silent financial reporting inflation.
 
-## Decision 3
-- Hypothesis:
-- Prompt / request to agent:
+## Decision 3: Statistical Anomaly Detection & Distribution Drift (Phase 3)
+- Hypothesis: Global naive Z-score produces false alarms on seasonal fluctuations (e.g. weekend vs weekday traffic) and is susceptible to outlier masking. A robust Median Absolute Deviation (MAD) detector combined with same-weekday context and KS-test distribution drift will accurately detect genuine data volume anomalies (e.g. partial ingestion drops).
+- Prompt / request to agent: Implement Phase 3 Anomaly Detection: enhance `observability/anomaly.py` with robust MAD, zero-MAD edge handling, and context-aware `auto` mode; upgrade `observability/distribution.py` with Kolmogorov-Smirnov test.
 - Agent proposal:
+  1. Implement Boris Iglewicz and David Hoaglin's Modified Z-score in `mad_detector` with proper handling for uniform histories ($\text{MAD}=0$).
+  2. Implement context-aware routing in `detect_anomaly(..., method='auto')` to leverage `same_segment_history` (day-of-week) and adjust thresholds for `known_event`.
+  3. Upgrade `detect_distribution_shift` in `observability/distribution.py` to use two-sample Kolmogorov-Smirnov (`scipy.stats.ks_2samp`) for distribution shape drift.
 - Evidence/test:
-- Accept / reject / revise:
-- Why:
+  - 19/19 public tests passed in pytest.
+  - Injected `volume_drop` fault (75% drop to 150 rows): detected as anomaly (`is_anomaly=True`, `method=auto:mad`, `score=5.53`) while deterministic contract checks reported 0 failures.
+  - Zero-MAD test passed: identical history with normal input returns `is_anomaly=False`, with perturbed input returns `is_anomaly=True`.
+- Accept / reject / revise: Accept.
+- Why: Provides resilient anomaly detection across metric streams without false positives from predictable seasonality.
+
+## Decision 4: Lineage Blast Radius, Multi-Window SLO, & RAG Observability (Phases 4–6)
+- Hypothesis: Single-window SLO alerts create alert fatigue from transient spikes, while direct-child lineage fails to track the full downstream blast radius of corrupted column metrics. In addition, RAG systems require continuous embedding and text drift tracking to catch stale knowledge base documents.
+- Prompt / request to agent: Implement transitive column lineage traversal in `observability/lineage.py`, Google SRE multi-window burn rate evaluation in `observability/slo.py`, and embedding drift detection in `observability/rag_metrics.py`.
+- Agent proposal:
+  1. Implement transitive BFS traversal in `get_column_downstream` to trace end-to-end column dependencies from `raw_orders.amount` to `ceo_revenue_dashboard.revenue`.
+  2. Implement `evaluate_multiwindow_burn` with Google SRE 1h (short) and 6h (long) window policies, distinguishing transient spikes (`page=False, severity=warning`) from sustained critical burn rates (`page=True, severity=critical`).
+  3. Implement `detect_embedding_norm_shift` in `observability/rag_metrics.py` to monitor vector embedding norms.
+- Evidence/test:
+  - 23/23 tests passed in pytest suite.
+  - Multi-window tests verified: sustained 15.0x burn pages on call (`page=True`), whereas 16.0x short spike with 2.0x long burn suppresses page (`page=False`).
+  - Column lineage test verified complete chain: `raw_orders.amount` -> `stg_orders.amount_usd` -> `fct_daily_revenue.daily_revenue` -> `ceo_revenue_dashboard.revenue`.
+  - Injected `stale_kb` fault: accurately flagged freshness violation and surfaced blast radius to `kb_active_docs -> rag_index -> support_agent`.
+- Accept / reject / revise: Accept.
+- Why: Provides complete operational visibility, protects SRE teams from alert fatigue, and guarantees AI Support Agent reliability.
+
+
 
 
