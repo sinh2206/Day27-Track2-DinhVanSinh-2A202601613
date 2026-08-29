@@ -44,20 +44,70 @@
 - Accept / reject / revise: Accept.
 - Why: Provides resilient anomaly detection across metric streams without false positives from predictable seasonality.
 
-## Decision 4: Lineage Blast Radius, Multi-Window SLO, & RAG Observability (Phases 4–6)
-- Hypothesis: Single-window SLO alerts create alert fatigue from transient spikes, while direct-child lineage fails to track the full downstream blast radius of corrupted column metrics. In addition, RAG systems require continuous embedding and text drift tracking to catch stale knowledge base documents.
-- Prompt / request to agent: Implement transitive column lineage traversal in `observability/lineage.py`, Google SRE multi-window burn rate evaluation in `observability/slo.py`, and embedding drift detection in `observability/rag_metrics.py`.
+## Decision 4: Lineage Blast Radius & Column-Level Traversal (Phase 4)
+- Hypothesis: Direct-child lineage mapping only reveals immediate downstream tables (e.g. `raw_orders -> stg_orders`), failing to expose the true transitive blast radius when a specific metric column (e.g. `amount`) is corrupted. Transitive BFS graph traversal at both dataset and column levels is needed to compute impact on executive dashboards.
+- Prompt / request to agent: Upgrade `observability/lineage.py` with transitive column-level lineage traversal and manifest parsing.
 - Agent proposal:
-  1. Implement transitive BFS traversal in `get_column_downstream` to trace end-to-end column dependencies from `raw_orders.amount` to `ceo_revenue_dashboard.revenue`.
-  2. Implement `evaluate_multiwindow_burn` with Google SRE 1h (short) and 6h (long) window policies, distinguishing transient spikes (`page=False, severity=warning`) from sustained critical burn rates (`page=True, severity=critical`).
-  3. Implement `detect_embedding_norm_shift` in `observability/rag_metrics.py` to monitor vector embedding norms.
+  1. Implement transitive BFS queue in `get_column_downstream` to traverse from source columns through staging and mart models down to consumer exposures.
+  2. Implement `extract_dbt_dataset_graph` to parse dbt `manifest.json`.
 - Evidence/test:
-  - 23/23 tests passed in pytest suite.
-  - Multi-window tests verified: sustained 15.0x burn pages on call (`page=True`), whereas 16.0x short spike with 2.0x long burn suppresses page (`page=False`).
-  - Column lineage test verified complete chain: `raw_orders.amount` -> `stg_orders.amount_usd` -> `fct_daily_revenue.daily_revenue` -> `ceo_revenue_dashboard.revenue`.
-  - Injected `stale_kb` fault: accurately flagged freshness violation and surfaced blast radius to `kb_active_docs -> rag_index -> support_agent`.
+  - Column lineage test verified complete dependency chain: `raw_orders.amount` -> `stg_orders.amount_usd` -> `fct_daily_revenue.daily_revenue` -> `ceo_revenue_dashboard.revenue`.
+  - Dataset lineage test verified transitive BFS traversal: `raw_orders` -> `stg_orders`, `fct_daily_revenue`, `ceo_revenue_dashboard`.
 - Accept / reject / revise: Accept.
-- Why: Provides complete operational visibility, protects SRE teams from alert fatigue, and guarantees AI Support Agent reliability.
+- Why: Guarantees precise impact scoping for on-call engineers when deciding incident blast radius.
+
+## Decision 5: SLO Multi-Window Burn-Rate Alerting Policy (Phase 5)
+- Hypothesis: Single-window error budget alerting causes severe alert fatigue due to brief, transient error spikes. A multi-window multi-burn-rate policy following Google SRE principles (1h short window + 6h long window) ensures paging triggers only for sustained, critical budget exhaustion.
+- Prompt / request to agent: Implement a multi-window burn-rate policy in `observability/slo.py`. Add tests for sustained fast burn (paging) and transient spikes (no page).
+- Agent proposal:
+  1. Implement `evaluate_multiwindow_burn` requiring both short window ($\ge 14.4\times$) and long window ($\ge 14.4\times$) burn rates to trigger page alerts.
+  2. Demote short-window-only spikes to `severity: warning, page: False`.
+- Evidence/test:
+  - Test `test_sustained_fast_burn_triggers_page` (short=15.0, long=14.8) passed with `page=True, severity="critical"`.
+  - Test `test_transient_spike_does_not_page` (short=16.0, long=2.0) passed with `page=False, severity="warning"`.
+- Accept / reject / revise: Accept.
+- Why: Meets Google SRE reliability standards, avoiding on-call burnout while preserving high-urgency notifications for real outages.
+
+## Decision 6: Mystery Incident Investigation & Root Cause Ranking (Phase 6)
+- Hypothesis: By analyzing telemetry strictly from Contract Validation, dbt test assertions, MAD volume detectors, and Transitive Lineage (without inspecting the fault injection scripts), we can rank potential root causes and eliminate false hypotheses with empirical evidence.
+- Prompt / request to agent: Do not inspect the fault-injection script. Based only on contract results, dbt tests, anomaly metrics, lineage and SLO output, rank three root-cause hypotheses and list evidence for/against each.
+- Agent proposal:
+  - **Hypothesis A (Rank 1 - Proven):** Upstream Knowledge Base sync failure causing stale embeddings.
+    - *Evidence For:* `kb_contract` freshness failed (`delay_minutes=185.2 > 60`), blast radius traced to `support_agent`.
+    - *Evidence Against:* None.
+  - **Hypothesis B (Rank 2 - Proven in Mart):** Customer dimension join fanout causing revenue inflation.
+    - *Evidence For:* dbt unit test `test_customer_dimension_scd_does_not_inflate_revenue` failed with doubled revenue.
+    - *Evidence Against:* Orders contract itself passed schema validation (clean orders).
+  - **Hypothesis C (Rank 3 - Refuted):** Data corruption in order amount currencies.
+    - *Evidence Against:* All currency values strictly passed contract accepted set `['USD', 'VND']`.
+- Evidence/test:
+  - Incident report written in `reports/incident_report.md` with complete evidence references and action items.
+- Accept / reject / revise: Accept.
+- Why: Enforces evidence-driven Root Cause Analysis (RCA) and disciplined postmortem practices.
+
+## Decision 7: Soda Data Contract Integration (Bonus +5)
+- Hypothesis: Adding a declarative SodaCL data contract (`contracts/soda/orders_soda_contract.yml`) and Soda-style assertion engine provides industry-standard contract specification supporting schema matching, bounds, invalid sets, and freshness.
+- Prompt / request to agent: Integrate Soda Data Contract into the project.
+- Agent proposal:
+  1. Define SodaCL contract specification in `contracts/soda/orders_soda_contract.yml`.
+  2. Implement `src/soda_validator.py` with `run_soda_scan` evaluating dataset-level row counts, schema matching, and column-level checks.
+- Evidence/test:
+  - `tests_public/test_soda_contract.py` passed: verified healthy contract scan and caught duplicate/invalid currency violations.
+- Accept / reject / revise: Accept.
+- Why: Standardizes contract declarations with SodaCL syntax across teams.
+
+## Decision 8: Elementary OSS Data Observability Integration (Bonus +5)
+- Hypothesis: Parsing dbt execution artifacts (`manifest.json` and `run_results.json`) into Elementary-compatible models (`elementary_test_results`, `schema_columns_snapshot`) enables automated schema change alerts and centralized observability.
+- Prompt / request to agent: Integrate Elementary OSS into the data reliability pipeline.
+- Agent proposal:
+  1. Implement `observability/elementary_oss.py` with `ElementaryOSSEngine`.
+  2. Extract test execution telemetry, detect schema drift (column added/removed, type changed), and generate actionable alerts.
+- Evidence/test:
+  - `tests_public/test_elementary.py` passed: verified schema drift detection and critical alert generation for test failures.
+- Accept / reject / revise: Accept.
+- Why: Bridges dbt transformation tests with centralized observability and real-time alert routing.
+
+
 
 
 

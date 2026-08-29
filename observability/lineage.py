@@ -57,3 +57,55 @@ def extract_dbt_dataset_graph(manifest_path: str | Path) -> dict[str, list[str]]
         graph[parent] = list(children)
     return graph
 
+
+def create_openlineage_event(
+    job_name: str,
+    inputs: list[str],
+    outputs: list[str],
+    *,
+    event_type: str = "COMPLETE",
+    namespace: str = "data_reliability_lab",
+) -> dict[str, Any]:
+    """Create a standard OpenLineage RunEvent for dataset lineage tracking."""
+    import uuid
+    from datetime import datetime, timezone
+
+    return {
+        "eventType": event_type,
+        "eventTime": datetime.now(timezone.utc).isoformat(),
+        "run": {
+            "runId": str(uuid.uuid4()),
+            "facets": {
+                "environment": {
+                    "_producer": "openlineage-data-reliability-lab",
+                    "_schemaURL": "https://openlineage.io/spec/1-0-5/OpenLineage.json",
+                    "environment": "production",
+                }
+            },
+        },
+        "job": {
+            "namespace": namespace,
+            "name": job_name,
+            "facets": {},
+        },
+        "inputs": [
+            {
+                "namespace": namespace,
+                "name": inp,
+                "facets": {},
+            }
+            for inp in inputs
+        ],
+        "outputs": [
+            {
+                "namespace": namespace,
+                "name": out,
+                "facets": {},
+            }
+            for out in outputs
+        ],
+        "producer": "https://openlineage.io/client/python/data_reliability_lab",
+        "schemaURL": "https://openlineage.io/spec/1-0-5/OpenLineage.json",
+    }
+
+

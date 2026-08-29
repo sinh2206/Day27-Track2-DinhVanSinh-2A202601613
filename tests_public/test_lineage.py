@@ -23,3 +23,16 @@ def test_transitive_column_downstream():
         "ceo_revenue_dashboard.revenue",
     ]
 
+
+def test_openlineage_event_generation():
+    from observability.lineage import create_openlineage_event
+    event = create_openlineage_event(
+        job_name="stg_orders_to_fct_daily_revenue",
+        inputs=["stg_orders", "stg_customers"],
+        outputs=["fct_daily_revenue"],
+    )
+    assert event["eventType"] == "COMPLETE"
+    assert event["job"]["name"] == "stg_orders_to_fct_daily_revenue"
+    assert len(event["inputs"]) == 2
+    assert len(event["outputs"]) == 1
+    assert "schemaURL" in event

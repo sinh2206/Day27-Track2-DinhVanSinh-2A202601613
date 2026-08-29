@@ -1,0 +1,59 @@
+# Soda Data Contract Specification (SodaCL)
+# Dataset: orders
+dataset: orders
+
+columns:
+  - name: order_id
+    data_type: integer
+    checks:
+      - missing_count = 0
+      - duplicate_count = 0
+
+  - name: customer_id
+    data_type: integer
+    checks:
+      - missing_count = 0
+
+  - name: amount
+    data_type: number
+    checks:
+      - missing_count = 0
+      - min >= 0.01
+      - max <= 100000.0
+
+  - name: currency
+    data_type: string
+    checks:
+      - missing_count = 0
+      - invalid_values not in ['USD', 'VND']
+
+  - name: status
+    data_type: string
+    checks:
+      - invalid_values not in ['pending', 'completed', 'refunded', 'cancelled']
+
+  - name: created_at
+    data_type: datetime
+    checks:
+      - missing_count = 0
+
+  - name: updated_at
+    data_type: datetime
+    checks:
+      - missing_count = 0
+      - freshness < 1d
+
+checks:
+  - row_count between 100 and 100000
+  - schema:
+      name: Confirm orders schema matches contract
+      fail:
+        when required column missing: [order_id, customer_id, amount, currency, status, created_at, updated_at]
+        when wrong column type:
+          order_id: integer
+          customer_id: integer
+          amount: number
+          currency: string
+          status: string
+          created_at: datetime
+          updated_at: datetime
