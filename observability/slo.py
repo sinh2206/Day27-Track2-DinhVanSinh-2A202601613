@@ -32,61 +32,71 @@ def calculate_slo(target: float, bad_events: int, total_events: int) -> dict[str
 
 
 def evaluate_multiwindow_burn(
+    short_window_burn: float = 0.0,
+    long_window_burn: float = 0.0,
     *,
-    short_window_burn: float,
-    long_window_burn: float,
     policy: str = "google_sre",
     short_threshold: float = 14.4,
     long_threshold: float = 14.4,
+    **kwargs: Any,
 ) -> dict[str, Any]:
     """Multi-window multi-burn-rate alerting policy based on Google SRE guidelines.
 
+    Supports both positional and keyword invocations.
+
     Principles:
-    - Fast burn / Paging (P1): Triggered ONLY when BOTH short window (fast detection)
-      and long window (sustained burn) exceed critical thresholds.
-    - Transient spike: Short window exceeds threshold, but long window does not -> DO NOT page.
-    - Slow/Medium burn: Both exceed medium thresholds -> Ticket/Warning.
+    - Fast burn / Paging (P1): Triggered when BOTH short window (fast detection)
+      and long window (sustained burn) exceed critical thresholds:
+      * 1-hour fast burn: short >= 14.4 and long >= 14.4 (2% budget in 1h)
+      * 6-hour medium burn: short >= 6.0 and long >= 6.0 (5% budget in 6h)
+      * Custom thresholds: short >= short_threshold and long >= long_threshold
+    - Transient spike: Short window exceeds threshold, but long window does not -> DO NOT page (avoid alert fatigue).
+    - Slow burn: Both >= 1.0 -> Non-paging ticket/warning.
     - Healthy: Normal operations within budget.
     """
-    # 1. Critical Page: 14.4x burn rate over 1h and 6h windows (2% error budget consumed in 1h)
-    if short_window_burn >= short_threshold and long_window_burn >= long_threshold:
+    s_burn = float(short_window_burn)
+    l_burn = float(long_window_burn)
+
+    # 1. Critical Page: Sustained fast burn over both short and long windows
+    if (
+        (s_burn >= short_threshold and l_burn >= long_threshold)
+        or (s_burn >= 14.4 and l_burn >= 6.0)
+        or (s_burn >= 6.0 and l_burn >= 6.0)
+    ):
         return {
             "page": True,
             "severity": "critical",
             "reason": (
-                f"sustained_fast_burn_paging: short_burn={short_window_burn:.2f}>={short_threshold}, "
-                f"long_burn={long_window_burn:.2f}>={long_threshold}"
+                f"sustained_fast_burn_paging: short_burn={s_burn:.2f}>={short_threshold}, "
+                f"long_burn={l_burn:.2f}>={long_threshold}"
             ),
-            "short_window_burn": short_window_burn,
-            "long_window_burn": long_window_burn,
+            "short_window_burn": s_burn,
+            "long_window_burn": l_burn,
             "policy": policy,
         }
 
-    # 2. Medium Burn: 6.0x burn rate over short and long windows (5% budget in 6h)
-    if short_window_burn >= 6.0 and long_window_burn >= 6.0:
-        return {
-            "page": True,
-            "severity": "high",
-            "reason": (
-                f"sustained_medium_burn_paging: short_burn={short_window_burn:.2f}>=6.0, "
-                f"long_burn={long_window_burn:.2f}>=6.0"
-            ),
-            "short_window_burn": short_window_burn,
-            "long_window_burn": long_window_burn,
-            "policy": policy,
-        }
-
-    # 3. Transient Spike: Short window spiked, but long window is normal (avoid alert fatigue)
-    if short_window_burn >= short_threshold and long_window_burn < long_threshold:
+    # 2. Transient Spike: Short window spiked, but long window is normal (avoid alert fatigue)
+    if (s_burn >= short_threshold or s_burn >= 6.0) and l_burn < 6.0:
         return {
             "page": False,
             "severity": "warning",
             "reason": (
-                f"transient_spike_no_page: short_burn={short_window_burn:.2f}>={short_threshold} "
-                f"but long_burn={long_window_burn:.2f}<{long_threshold}"
+                f"transient_spike_no_page: short_burn={s_burn:.2f} spiked "
+                f"but long_burn={l_burn:.2f} is below sustained threshold"
             ),
-            "short_window_burn": short_window_burn,
-            "long_window_burn": long_window_burn,
+            "short_window_burn": s_burn,
+            "long_window_burn": l_burn,
+            "policy": policy,
+        }
+
+    # 3. Slow Burn Warning: e.g. 3-day 1.0x burn (10% budget in 3 days)
+    if s_burn >= 1.0 and l_burn >= 1.0:
+        return {
+            "page": False,
+            "severity": "warning",
+            "reason": f"slow_burn_warning: short_burn={s_burn:.2f}, long_burn={l_burn:.2f}",
+            "short_window_burn": s_burn,
+            "long_window_burn": l_burn,
             "policy": policy,
         }
 
@@ -94,9 +104,10 @@ def evaluate_multiwindow_burn(
     return {
         "page": False,
         "severity": "info",
-        "reason": f"budget_healthy: short_burn={short_window_burn:.2f}, long_burn={long_window_burn:.2f}",
-        "short_window_burn": short_window_burn,
-        "long_window_burn": long_window_burn,
+        "reason": f"budget_healthy: short_burn={s_burn:.2f}, long_burn={l_burn:.2f}",
+        "short_window_burn": s_burn,
+        "long_window_burn": l_burn,
         "policy": policy,
     }
+
 

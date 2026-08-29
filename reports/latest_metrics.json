@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-08-29T03:01:53.088320+00:00",
+  "timestamp": "2026-08-29T05:16:16.093921+00:00",
   "orders_rows": 600,
   "failed_contract_checks": 0,
   "critical_contract_failures": 0,
@@ -10,7 +10,7 @@
     "method": "auto:mad",
     "reason": "median=252.500, mad=12.500, threshold=3.0 [context: metric_name=row_count, day_of_week=5]"
   },
-  "orders_freshness_minutes": 5.034462933333333,
+  "orders_freshness_minutes": 5.201220433333333,
   "kb_text_length_signal": {
     "is_anomaly": false,
     "score": 0.7547940916996035,

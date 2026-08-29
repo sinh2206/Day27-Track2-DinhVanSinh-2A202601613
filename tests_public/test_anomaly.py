@@ -45,3 +45,32 @@ def test_auto_detects_true_volume_drop():
     res = detect_metric(150, history, method="auto")
     assert res["is_anomaly"] is True
 
+
+def test_auto_handles_raw_daily_history_with_day_of_week():
+    # 14 days of sequential data (Mon..Sun, Mon..Sun) without caller-side segmenting
+    # Week 1: Mon-Fri (~1000), Sat (500), Sun (490)
+    # Week 2: Mon-Fri (~1000), Sat (505), Sun (495)
+    history = [
+        1000, 1010, 990, 1020, 1005, 500, 490,
+        1005, 1015, 995, 1010, 1000, 505, 495,
+    ]
+    # Today is Saturday (day_of_week=5). Current volume = 500 is normal for Saturday
+    res_sat_normal = detect_metric(500, history, method="auto", context={"day_of_week": 5})
+    assert res_sat_normal["is_anomaly"] is False
+
+    # Saturday volume drop (150) must be detected as anomaly
+    res_sat_drop = detect_metric(150, history, method="auto", context={"day_of_week": 5})
+    assert res_sat_drop["is_anomaly"] is True
+
+
+def test_auto_handles_known_event():
+    history = [1000, 1010, 995, 1008, 1004, 1012, 998]
+    # Promotional spike during known event is accepted
+    res_promo = detect_metric(2500, history, method="auto", context={"known_event": "flash_sale"})
+    assert res_promo["is_anomaly"] is False
+
+    # Volume drop during known event is an anomaly
+    res_promo_drop = detect_metric(200, history, method="auto", context={"known_event": "flash_sale"})
+    assert res_promo_drop["is_anomaly"] is True
+
+

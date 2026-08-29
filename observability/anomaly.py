@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 import numpy as np
+import pandas as pd
 
 
 def zscore_detector(
@@ -19,8 +20,13 @@ def zscore_detector(
     threshold: float = 3.0,
 ) -> dict[str, Any]:
     """Standard Z-score anomaly detector."""
-    values = np.asarray(list(history), dtype=float)
-    if values.size < 3:
+    if isinstance(history, (pd.Series, pd.DataFrame)):
+        values = history.dropna().values.astype(float)
+    else:
+        values = np.asarray(list(history), dtype=float)
+        values = values[~np.isnan(values)]
+
+    if values.size < 2:
         return {
             "is_anomaly": False,
             "score": 0.0,
@@ -55,14 +61,20 @@ def mad_detector(
         M_i = 0.6745 * |x_i - median| / MAD
     Handles zero-MAD edge cases cleanly when history has identical values.
     """
-    values = np.asarray(list(history), dtype=float)
-    if values.size < 3:
+    if isinstance(history, (pd.Series, pd.DataFrame)):
+        values = history.dropna().values.astype(float)
+    else:
+        values = np.asarray(list(history), dtype=float)
+        values = values[~np.isnan(values)]
+
+    if values.size < 2:
         return {
             "is_anomaly": False,
             "score": 0.0,
             "method": "mad",
             "reason": "insufficient_history",
         }
+
 
     median = float(np.median(values))
     mad = float(np.median(np.abs(values - median)))
@@ -91,6 +103,57 @@ def mad_detector(
     }
 
 
+def _extract_context_segment(
+    history: Iterable[float],
+    context: dict[str, Any] | None,
+) -> tuple[np.ndarray, str]:
+    """Extract context-aware subsegment (e.g. same day-of-week) from history."""
+    ctx = context or {}
+    dow = ctx.get("day_of_week")
+
+    # 1. Explicit same_segment_history passed in context
+    if "same_segment_history" in ctx and ctx["same_segment_history"] is not None:
+        seg = np.asarray(list(ctx["same_segment_history"]), dtype=float)
+        seg = seg[~np.isnan(seg)]
+        if seg.size >= 2:
+            return seg, "auto:seasonal_mad"
+
+    # 2. History passed as pandas DataFrame with day_of_week column
+    if isinstance(history, pd.DataFrame):
+        metric = ctx.get("metric_name", "row_count")
+        col = metric if metric in history.columns else history.select_dtypes(include=[np.number]).columns[-1]
+        if dow is not None and "day_of_week" in history.columns:
+            seg = history.loc[history["day_of_week"] == dow, col].dropna().values.astype(float)
+            if seg.size >= 2:
+                return seg, "auto:seasonal_mad"
+        return history[col].dropna().values.astype(float), "auto:mad"
+
+    # 3. History passed as pandas Series with datetime index
+    if isinstance(history, pd.Series):
+        if dow is not None and hasattr(history.index, "dayofweek"):
+            seg = history[history.index.dayofweek == dow].dropna().values.astype(float)
+            if seg.size >= 2:
+                return seg, "auto:seasonal_mad"
+        return history.dropna().values.astype(float), "auto:mad"
+
+    # 4. History passed as flat list or array of daily sequential values
+    vals = np.asarray(list(history), dtype=float)
+    vals = vals[~np.isnan(vals)]
+
+    if dow is not None and vals.size >= 7:
+        # Extract matching weekday stride (e.g. index % 7 == dow)
+        stride_candidates = [
+            vals[dow::7],
+            vals[- (7 - dow)::7] if dow < 7 else vals,
+            vals[(dow - (vals.size % 7)) % 7::7],
+        ]
+        for c in stride_candidates:
+            if c.size >= 2:
+                return c, "auto:seasonal_mad"
+
+    return vals, "auto:mad"
+
+
 def detect_anomaly(
     current: float,
     history: Iterable[float],
@@ -105,9 +168,9 @@ def detect_anomaly(
     - `zscore`: Standard z-score.
     - `mad`: Robust Median Absolute Deviation.
     - `auto`: Context-aware detector that evaluates:
-        - `same_segment_history`: compares against same day-of-week or category.
-        - `known_event`: adjusts tolerance during expected anomalies (e.g. flash sales).
-        - Defaults to robust MAD detector to avoid mask effects caused by outliers in history.
+        - `same_segment_history` / `day_of_week`: compares against same weekday.
+        - `known_event`: suppresses false alarms for expected promotional spikes.
+        - Defaults to robust MAD detector to avoid outlier masking.
     """
     if method == "zscore":
         return zscore_detector(current, history, threshold=threshold)
@@ -117,41 +180,39 @@ def detect_anomaly(
 
     if method == "auto":
         ctx = context or {}
-        segment_history = ctx.get("same_segment_history")
+        eff_history, method_name = _extract_context_segment(history, ctx)
+
+        # Compute MAD score on the effective history
+        result = mad_detector(current, eff_history, threshold=threshold)
         
-        # 1. Seasonality awareness: if same-weekday or segment history is provided with >=3 points, use it
-        if segment_history is not None:
-            seg_vals = list(segment_history)
-            if len(seg_vals) >= 3:
-                eff_history = seg_vals
-                method_name = "auto:seasonal_mad"
-            else:
-                eff_history = list(history)
+        # Fallback to general history if segment was too small
+        if result["reason"] == "insufficient_history":
+            gen_vals = np.asarray(list(history), dtype=float)
+            gen_vals = gen_vals[~np.isnan(gen_vals)]
+            if gen_vals.size >= 3:
+                result = mad_detector(current, gen_vals, threshold=threshold)
                 method_name = "auto:mad"
-        else:
-            eff_history = list(history)
-            method_name = "auto:mad"
 
-        # 2. Known event awareness: widen threshold if event is scheduled
-        effective_threshold = threshold
+        result["method"] = method_name
+
+        # Context-aware event handling (e.g. promo/flash sale where spike is expected)
         if ctx.get("known_event"):
-            effective_threshold = threshold * 2.0
-
-        result = mad_detector(current, eff_history, threshold=effective_threshold)
-        
-        # Fallback to Z-score if MAD had insufficient history but general history is longer
-        if result["reason"] == "insufficient_history" and len(list(history)) >= 3:
-            result = zscore_detector(current, history, threshold=threshold)
-            result["method"] = "auto:zscore"
-        else:
-            result["method"] = method_name
+            median = float(np.median(eff_history)) if eff_history.size > 0 else 0.0
+            if float(current) >= median:
+                # Promotional increase is expected and legitimate
+                result["is_anomaly"] = False
+                result["reason"] += " [known_event_spike_accepted]"
+            else:
+                # A drop during a promo is still an anomaly
+                result["reason"] += " [known_event_drop]"
 
         if ctx:
             ctx_summary = ", ".join(f"{k}={v}" for k, v in ctx.items() if k != "same_segment_history")
-            if ctx_summary:
+            if ctx_summary and "[context:" not in result["reason"]:
                 result["reason"] += f" [context: {ctx_summary}]"
 
         return result
 
     raise ValueError(f"Unsupported method: {method}")
+
 
